@@ -1,0 +1,96 @@
+---
+title: "Report"
+output: html_document
+---
+
+## Data analysis
+
+First we load the training data set.
+```{r dataread, cache=TRUE}
+training <- read.csv("pml-training.csv")
+```
+
+Than we do some other general setup.
+```{r}
+library <- function(...) {suppressMessages(base::library(...))}
+```
+
+We restrict our attention only to complete sensor variables
+
+```{r}
+select <- names(which(sapply(training[8:159], function(c) { 
+    if (class(c) == 'factor') return(F);
+    if (any(is.na(c))) return(F);
+    return(T);
+    })))
+```
+
+We use a randomForest model on the selected variables
+
+```{r}
+library(randomForest)
+fitmodel <- function(df) {
+    mod <- randomForest(df[,select],df[,160])
+    function(nd) { predict(mod, nd[,select])}
+}
+
+```
+
+Cross-validation
+----------------
+
+We set up k-fold cross-validation.
+```{r foldedmodels, cache=TRUE}
+library(caret)
+set.seed(45681)
+folds <- createFolds(training$classe, k=5, returnTrain = T)
+models <- lapply(folds, function(f) fitmodel(training[f,]))
+```
+
+Then we can assess the out-of-sample error rate on each fold:
+
+```{r errorstats, cache=TRUE}
+error.rate <- function(mod, df) {
+    sum(mod(df)!=df[,160])/nrow(df)
+}
+
+error.rates <- sapply(1:length(folds), function(i) error.rate(models[[i]], training[-folds[[i]],]))
+summary(error.rates)
+print(mean.error.rate <- mean(error.rates))
+```
+
+Based on these results the out-of-sample error rate is expected to be `r mean.error.rate`.
+
+## Full Model
+
+We can then train the model on the full training data set
+
+```{r fullmodel, cache=TRUE}
+full <- fitmodel(training)
+```
+
+## Testing
+
+Finally, we load the testing dataset and apply the full model.
+
+```{r testing, cache=TRUE}
+testing <- read.csv("pml-testing.csv")
+
+print(answers <- full(testing))
+```
+
+Then, we save the results into separate files for submission.
+ 
+```{r}
+pml_write_files <- function(answers, folder){
+    dir.create(folder, showWarnings=FALSE)
+    for(i in 1:length(answers)) {
+        write.table(
+            answers[i],file=file.path(folder, sprintf("problem_id_%02d.txt", i)),
+            quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+}
+
+pml_write_files(answers, "output")
+```
+
